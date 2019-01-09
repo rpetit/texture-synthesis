@@ -1,3 +1,7 @@
+import numpy as np
+import scipy.interpolate
+from scipy.fftpack import fft2, ifft2, fftshift
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -41,10 +45,10 @@ def gram_matrix(input):
     a, b, c, d = input.size() # a: batch size (1), b: number of feature maps, (c,d): feature maps' dimensions
     features = input.view(a * b, c * d)
 
-    G = torch.mm(features, features.t())  # compute the gram product
+    g = torch.mm(features, features.t())  # compute the gram product
 
     # divide by the number of elements in each feature maps
-    return G.div(a * b * c * d)
+    return g.div(a * b * c * d)
 
 
 class TextureLoss(nn.Module):
@@ -70,8 +74,8 @@ def get_texture_model_and_losses(cnn, texture_img, texture_layers, device):
     normalization = Normalization(cnn_normalization_mean, cnn_normalization_std).to(device)
     model = nn.Sequential(normalization)
 
-    i = 0  # increment every time we see a conv
-    j = 0  # increment every time we see a pool
+    i = 0  # increment every time we see a convolution
+    j = 0  # increment every time we see a pooling
 
     for layer in cnn.children():
         if isinstance(layer, nn.Conv2d):
@@ -97,7 +101,7 @@ def get_texture_model_and_losses(cnn, texture_img, texture_layers, device):
             model.add_module("texture_loss_{}".format(i + j), texture_loss)
             texture_losses.append(texture_loss)
 
-    # trim off the layers after the last texture loss
+    # remove the layers after the last one contributing to the texture loss
     for i in range(len(model) - 1, -1, -1):
         if isinstance(model[i], TextureLoss):
             break
@@ -110,8 +114,9 @@ def get_texture_model_and_losses(cnn, texture_img, texture_layers, device):
 def run_texture_synthesis(cnn, texture_image, image_size, num_steps, device, verbose=True):
 
     texture_img = pre_processing(texture_image, image_size, device)
-    synthesized_img = torch.randn(texture_img.data.size(), device=device)
+
     rescale = transforms.Lambda(lambda x: (x - x.min()) / (x.max() - x.min()))
+    synthesized_img = torch.randn(texture_img.data.size(), device=device)
     synthesized_img = rescale(synthesized_img)
     
     if verbose:
@@ -154,44 +159,26 @@ def run_texture_synthesis(cnn, texture_image, image_size, num_steps, device, ver
     return post_processing(synthesized_img)
 
 
-import numpy as np
-import scipy.interpolate
-
-
-def uniform_hist(X):
-    '''
-    Maps data distribution onto uniform histogram
-
-    :param X: data vector
-    :return: data vector with uniform histogram
-    '''
-
-    Z = [(x, i) for i, x in enumerate(X)]
-    Z.sort()
-    n = len(Z)
-    Rx = [0] * n
+def uniform_hist(x):
+    z = [(x_i, i) for i, x_i in enumerate(x)]
+    z.sort()
+    n = len(z)
+    rx = [0] * n
     start = 0  # starting mark
+
     for i in range(1, n):
-        if Z[i][0] != Z[i - 1][0]:
+        if z[i][0] != z[i - 1][0]:
             for j in range(start, i):
-                Rx[Z[j][1]] = float(start + 1 + i) / 2.0;
+                rx[z[j][1]] = float(start + 1 + i) / 2.0
             start = i
+
     for j in range(start, n):
-        Rx[Z[j][1]] = float(start + 1 + n) / 2.0;
-    return np.asarray(Rx) / float(len(Rx))
+        rx[z[j][1]] = float(start + 1 + n) / 2.0
+
+    return np.asarray(rx) / float(len(rx))
 
 
 def histogram_matching(org_image, match_image, grey=False, n_bins=100):
-    '''
-    Matches histogram of each color channel of org_image with histogram of match_image
-
-    :param org_image: image whose distribution should be remapped
-    :param match_image: image whose distribution should be matched
-    :param grey: True if images are greyscale
-    :param n_bins: number of bins used for histogram calculation
-    :return: org_image with same histogram as match_image
-    '''
-
     if grey:
         hist, bin_edges = np.histogram(match_image.ravel(), bins=n_bins, density=True)
         cum_values = np.zeros(bin_edges.shape)
@@ -200,6 +187,7 @@ def histogram_matching(org_image, match_image, grey=False, n_bins=100):
         r = np.asarray(uniform_hist(org_image.ravel()))
         r[r > cum_values.max()] = cum_values.max()
         matched_image = inv_cdf(r).reshape(org_image.shape)
+
     else:
         matched_image = np.zeros_like(org_image)
         for i in range(3):
@@ -212,3 +200,14 @@ def histogram_matching(org_image, match_image, grey=False, n_bins=100):
             matched_image[:, :, i] = inv_cdf(r).reshape(org_image[:, :, i].shape)
 
     return matched_image
+
+
+def compute_autocorrelation(img):
+    img = img.convert('L')
+    img = np.array(img) / 255
+    img = img - img.mean()
+
+    autocorr = np.real(fftshift(ifft2(fft2(img) * np.conjugate(fft2(img)))))
+    autocorr = autocorr / autocorr[img.shape[0] // 2, img.shape[1] // 2]
+
+    return autocorr
