@@ -1,6 +1,6 @@
 # Visual texture synthesis using CNNs <br/>
 
-Imaging project (MVA course) <br/>
+Imaging school project <br/>
 
 ![alt text](https://github.com/RomainPe/texture-synthesis/blob/master/images/showcase1.png "synthesis showcase 1") </br>
 
