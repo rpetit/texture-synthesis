@@ -1,6 +1,6 @@
 # Visual texture synthesis using CNNs <br/>
 
-Imaging school project <br/>
+Imaging school project (see the [report file](https://github.com/rpetit/texture-synthesis/blob/master/report.pdf)). <br/>
 
 ![alt text](https://github.com/RomainPe/texture-synthesis/blob/master/images/showcase1.png "synthesis showcase 1") </br>
 
